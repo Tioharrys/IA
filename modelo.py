@@ -36,6 +36,7 @@ class Condiciones:
     clima_adverso: bool = False
     hora_punta: bool = False
     incidencia: bool = False
+    accesibilidad: bool =False
 
 @dataclass
 class RedMetro:
