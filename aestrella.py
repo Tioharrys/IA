@@ -54,6 +54,9 @@ class AEstrella:
                 continue
             tiempo_real=conexion.minutos * AEstrella.retraso(actual,vecino)#Si es vecino añadimos su tiempo real a la lista adyacentes
             if conexion.tipo =="transbordo": #Si es tranbordo le sumamos su tiempo de espera correspondiente
+                if modelo.CONDICIONES.accesibilidad:
+                    if not (actual.ascensor and vecino.ascensor):
+                        continue
                 if modelo.CONDICIONES.hora_punta:
                     tiempo_real+=vecino.linea.frecuencia_punta/2
                 else:
@@ -74,4 +77,3 @@ class AEstrella:
             factor*=3.0
         return factor
 
-    
