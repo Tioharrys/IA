@@ -6,22 +6,27 @@ import modelo
 from heuristica import *
 class AEstrella:
     def a_estrella(origen: Estacion, destino: Estacion):
-        contador= count()
-        abierta=[(heuristica(origen,destino) , next(contador),origen)] # Lista abierta(nodos no evaluados) ordenado por f(n)
-        cerrada=set()# Lista cerrada vacia (nodos evaluados)
-        if modelo.CONDICIONES.hora_punta:
+        if modelo.CONDICIONES.hora_punta:#Si es hora punta
             tiempo_subida=origen.linea.frecuencia_punta/2 # tiempo de espera de subida en hora punta
-        else:
-            tiempo_subida=origen.linea.frecuencia/2
-        if origen.mecanicas or origen.ascensor:
-            tiempo_subida-=0.5
+        else:#Si es hora valle
+            tiempo_subida=origen.linea.frecuencia/2#tiempo de espera de subida en hora valle
+                
+        g={origen:tiempo_subida}#diccionario con los pesos acumulados
         
-        g={origen:tiempo_subida}
-
         padre = {origen: None}#padres de los nodos
         camino= [] #camino optimo
+        contador= count()#contador para ordenar en heap en caso de empate
+        abierta=[(heuristica(origen,destino)+g.get(origen) , next(contador),origen)] # Lista abierta(nodos no evaluados) ordenado por f(n)
+        cerrada=set()# Lista cerrada vacia (nodos evaluados)
+         
+        for tramo in modelo.CONDICIONES.incidencias:#Si la estacion origen esta suspendida, la ruta no esta disponible
+            if tramo.tipo==Incidencia.suspendido and origen.id in tramo.estaciones:
+                return None
 
-        while abierta:
+      
+
+        while abierta:#mientras haya nodos en la lista abierta
+
             _,_,actual=heapq.heappop(abierta)#Extraemos el nodo con menor f(n)
 
             if actual in cerrada: # Si el nodo actual ya lo hemos evaluado nos lo saltamos
@@ -34,46 +39,80 @@ class AEstrella:
                 return camino[::-1], g[destino] #Invertimos orden
             
             cerrada.add(actual) #Añadimos nodo a lista cerrada porque lo vamos a evaluar
+
             for adyacente, coste in AEstrella.lista_adyacentes(actual): #Recorremos los adyacentes del nodo actual
-                nuevo_g = g[actual] + coste #Coste con vecino actual
-                if nuevo_g < g.get(adyacente, float("inf")): #Si es menor que el que ya teniamos, lo actualizamos
+                nuevo_g = g[actual] + coste #tiempo acumulado sumado al vecino actual
+
+                if nuevo_g < g.get(adyacente, float("inf")): #Si es menor que el que ya teniamos, escogemos el vecino actual
                     g[adyacente] = nuevo_g
                     padre[adyacente] = actual 
                     f=nuevo_g + heuristica(adyacente,destino)#calculamos su f(n)
-                    heapq.heappush(abierta,(f,next(contador),adyacente))#Lo añadimos en el monticulo en la posicion que le corresponde en base a su f(n)
-        return None
+
+                    heapq.heappush(abierta,(f,next(contador),adyacente))#Lo añadimos al monticulo en la posicion que le corresponde en base a su f(n)
+        return None#Si no existe un camino
     
-    def lista_adyacentes(actual: Estacion):
+    def lista_adyacentes(actual: Estacion):#Devuelve lista con los nodos adyacentes
         adyacentes=[]
-        for conexion in modelo.GRAFO.conexiones:# Por cada conexion buscamos adyacentes al nodo
+        for conexion in modelo.GRAFO.conexiones:# Por cada conexion buscamos aquellas en las q se encuentre nodo actual y #asignamos vecino al otro nodo en la conexion
+            
             if conexion.nodo2.id == actual.id:
                 vecino=conexion.nodo1
+            
             elif conexion.nodo1.id == actual.id:
                 vecino=conexion.nodo2
+           
             else:
                 continue
-            tiempo_real=conexion.minutos * AEstrella.retraso(actual,vecino)#Si es vecino añadimos su tiempo real a la lista adyacentes
+
+            tiempo_real=AEstrella.tiempo_real(conexion,actual, vecino)#Si hemos encontrado conexion valida calculamos su tiempo real
+
+            if tiempo_real is None:#Si pertenece a un tramo cortado
+                continue#escogemos otro vecino si es posible
+
             if conexion.tipo =="transbordo": #Si es tranbordo le sumamos su tiempo de espera correspondiente
-                if modelo.CONDICIONES.accesibilidad:
-                    if not (actual.ascensor and vecino.ascensor):
+
+                if modelo.CONDICIONES.accesibilidad:#Si modo accesible esta activado
+                    if not (actual.ascensor and vecino.ascensor):#escogemos aquellos vecinos transbordos con ascensores
                         continue
-                if modelo.CONDICIONES.hora_punta:
+
+                if modelo.CONDICIONES.hora_punta:#si es hora punta
                     tiempo_real+=vecino.linea.frecuencia_punta/2
-                else:
+                
+                else:#Si es hora valle
                     tiempo_real+=vecino.linea.frecuencia/2
-                if vecino.mecanicas or vecino.ascensor:
+
+                if vecino.mecanicas or vecino.ascensor:#Si tiene ascensores o escaleras mecanicas se ahorra 30 segundos aprox.
                     tiempo_real-=0.5
             
-            adyacentes.append((vecino,tiempo_real))
+            adyacentes.append((vecino,tiempo_real))#añadimos vecino con su tiempo
         return adyacentes # Lista de adyacentes
     
-    def retraso(nodo1: Estacion,nodo2: Estacion):
-        factor=1.0
-        if modelo.CONDICIONES.clima_adverso:
-            factor *=1.10
-        if modelo.CONDICIONES.hora_punta:
-            factor*=1.25
-        if modelo.CONDICIONES.incidencia== (nodo1,nodo2):
-            factor*=3.0
-        return factor
+    def tiempo_real(conexion:Conexion,nodo1:Estacion,nodo2:Estacion):#Calculo tiempo de conexion
+
+        cond=modelo.CONDICIONES
+        tiempo=conexion.minutos#tiempo ideal o base
+        tiempo*=FACTOR_CLIMA[cond.clima]#tiempo cambia dependiendo del clima con un factor por cada estacion
+        if modelo.CONDICIONES.hora_punta:#tiempo cambia dependiendo de hora con un factor por cada estacion
+            tiempo*=FACTOR_PUNTA
+        
+    
+        for tramo in cond.incidencias:# Si hay alguna incidencia
+            actual_dentro=nodo1.id in tramo.estaciones#Comprobamos si los nodos estan implicados en alguna
+            vecino_dentro=nodo2.id in tramo.estaciones
+
+            if not actual_dentro and vecino_dentro and conexion.tipo=="tramo":#Si no hemos entrado todavia al tramo con incidencia, lo tratamos
+
+                if tramo.tipo == Incidencia.suspendido:#Comprobamos si es suspension
+                    return None#escogemos otro vecino si es posible
+                
+                else:#Si estan implicados en alguna otra incidencia
+                  tiempo+=RETRASO_INCIDENCIAS[tramo.tipo]#Sumamos su tiempo de retraso correspondiente(solo al entrar)
+
+            elif conexion.tipo=="transbordo":#Si es transbordo
+                if actual_dentro and not vecino_dentro:#Si salimos de un tramo con incidencia, lo ignoramos
+                    continue
+                elif not actual_dentro and vecino_dentro:#Si al hacer transbordo vamos a un tramo con incidencia
+                    tiempo+=RETRASO_INCIDENCIAS[tramo.tipo]#Sumamos su tiempo de retraso correspondiente
+        return tiempo
+        
 
